@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Casino del servidor</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f2a33;--panel:#163a45;--line:#2b5967;--ink:#e9f1ec;--mute:#9db9b6;--brass:#d4a94f;--red:#e0566a;--ok:#6fcf97;
+ box-sizing:border-box;padding-top:env(safe-area-inset-top,0)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Figtree,system-ui,sans-serif;min-height:100vh}
+h1,h2,.num{font-family:"Bricolage Grotesque",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px clamp(16px,4vw,40px);border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:1.3rem;font-weight:800}
+.bal{font-size:2rem;font-weight:800;color:var(--brass);line-height:1}
+.bal small{font-size:.9rem;color:var(--mute);font-weight:500;margin-left:6px}
+main{max-width:920px;margin:0 auto;padding:24px clamp(16px,4vw,40px) 60px}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+nav button{background:none;border:1px solid var(--line);color:var(--mute);padding:8px 16px;border-radius:99px;cursor:pointer;font:inherit}
+nav button[aria-selected=true]{background:var(--brass);border-color:var(--brass);color:#1d1708;font-weight:600}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(16px,3vw,28px)}
+.row{display:flex;flex-wrap:wrap;gap:14px;align-items:end}
+label{display:grid;gap:4px;color:var(--mute);font-size:.9rem}
+input,select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;min-width:0}
+button.go{background:var(--brass);color:#1d1708;border:0;border-radius:8px;padding:11px 22px;font:600 1rem Figtree,sans-serif;cursor:pointer}
+button.go:disabled{opacity:.5;cursor:wait}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.stage{margin:26px 0 8px;min-height:96px;display:flex;align-items:center;justify-content:center;font-size:3.4rem;gap:14px}
+.msg{text-align:center;min-height:1.6em;font-weight:600}
+.win{color:var(--ok)}.lose{color:var(--red)}
+.reel{animation:spin .5s steps(6) 1}
+@keyframes spin{from{transform:translateY(-14px);opacity:.3}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.reel{animation:none}}
+table{width:100%;border-collapse:collapse}td,th{padding:9px 6px;text-align:left;border-bottom:1px solid var(--line)}
+td:last-child,th:last-child{text-align:right}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+fieldset{border:1px solid var(--line);border-radius:10px;padding:14px;margin:0}
+legend{padding:0 6px;font-weight:600}
+.hint{color:var(--mute);font-size:.85rem}
+#login{text-align:center;padding:12vh 20px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 id="gname">Casino</h1><span class="hint" id="uname"></span></div>
+  <div class="bal num" id="bal" hidden><span id="balv">0</span><small id="cur"></small></div>
+</header>
+<main id="app"></main>
+
+<script>
+/* ======= CONFIGURA ESTO ======= */
+const API = "https://tu-api.example.com";   // URL pública de tu backend
+/* ============================== */
+
+const $ = s => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const GID = params.get("guild");
+let token = null, me = null, tab = "coinflip";
+try { // token llega en el hash tras el login de Discord
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("token")) { localStorage.setItem("tk", h.get("token")); history.replaceState(null, "", location.pathname + location.search); }
+  token = localStorage.getItem("tk");
+} catch {}
+
+const fmt = n => Math.floor(n).toLocaleString("es");
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: opts.body && JSON.stringify(opts.body) });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { try { localStorage.removeItem("tk"); } catch {} token = null; init(); throw new Error(d.error); }
+  if (!r.ok) throw new Error(d.error || "Error");
+  return d;
+}
+function setBal(n) { me.user.balance = n; $("#balv").textContent = fmt(n); }
+
+function loginView(msg) {
+  $("#app").innerHTML = `<div id="login" class="panel"><h2>${msg}</h2>
+   <p class="hint">Inicia sesión con Discord para jugar con el saldo virtual de tu servidor.</p>
+   ${GID ? `<button class="go" onclick="location.href='${API}/auth/login'">Entrar con Discord</button>` : ""}</div>`;
+}
+async function init() {
+  if (!GID) return loginView("Falta el servidor. Abre el enlace que te dio el bot (?guild=ID).");
+  if (!token) return loginView("Casino del servidor");
+  try { me = await api(`/api/guilds/${GID}/me`); }
+  catch (e) { return loginView(e.message || "No se pudo cargar"); }
+  $("#gname").textContent = me.guild; $("#uname").textContent = me.user.name;
+  $("#cur").textContent = me.config.currency; $("#bal").hidden = false; setBal(me.user.balance);
+  render();
+}
+
+const TABS = () => [
+  ...["coinflip", "dice", "slots"].filter(g => me.config.games[g]).map(g => [g, { coinflip: "Cara o cruz", dice: "Dados", slots: "Tragaperras" }[g]]),
+  ["daily", "Diario"], ["top", "Ranking"], ...(me.isAdmin ? [["admin", "Dashboard"]] : [])];
+function render() {
+  const t = TABS(); if (!t.find(x => x[0] === tab)) tab = t[0][0];
+  $("#app").innerHTML = `<nav role="tablist">${t.map(([k, n]) => `<button role="tab" aria-selected="${k === tab}" data-k="${k}">${n}</button>`).join("")}</nav><div class="panel" id="view"></div>`;
+  document.querySelectorAll("nav button").forEach(b => b.onclick = () => { tab = b.dataset.k; render(); });
+  ({ coinflip: vCoin, dice: vDice, slots: vSlots, daily: vDaily, top: vTop, admin: vAdmin })[tab]();
+}
+const betInput = () => `<label>Apuesta<input id="bet" type="number" min="${me.config.minBet}" max="${me.config.maxBet}" value="${me.config.minBet}"></label>`;
+async function play(body, show) {
+  const btn = $("#play"); btn.disabled = true; const m = $(".msg");
+  try {
+    const r = await api(`/api/guilds/${GID}/play`, { method: "POST", body: { ...body, bet: $("#bet").value } });
+    show(r); setBal(r.balance);
+    m.className = "msg " + (r.won > r.bet ? "win" : "lose");
+    m.textContent = r.won > r.bet ? `+${fmt(r.won - r.bet)} ${me.config.currency}` : `−${fmt(r.bet - r.won)} ${me.config.currency}`;
+  } catch (e) { m.className = "msg lose"; m.textContent = e.message; }
+  btn.disabled = false;
+}
+function vCoin() {
+  $("#view").innerHTML = `<div class="row"><label>Elige<select id="pick"><option value="cara">Cara</option><option value="cruz">Cruz</option></select></label>${betInput()}<button class="go" id="play">Lanzar</button></div>
+  <div class="stage" id="st">🪙</div><div class="msg"></div>`;
+  $("#play").onclick = () => play({ game: "coinflip", pick: $("#pick").value }, r => $("#st").innerHTML = `<span class="reel">${r.result === "cara" ? "😀 cara" : "⚜️ cruz"}</span>`);
+}
+function vDice() {
+  $("#view").innerHTML = `<div class="row"><label>Número objetivo<input id="tg" type="number" min="5" max="95" value="50"></label>
+  <label>Gana si sale<select id="ov"><option value="">menor que el objetivo</option><option value="1">mayor que el objetivo</option></select></label>${betInput()}<button class="go" id="play">Tirar</button></div>
+  <p class="hint">Se tira un número del 1 al 100. Cuanto menos probable, más paga.</p><div class="stage num" id="st">🎲</div><div class="msg"></div>`;
+  $("#play").onclick = () => play({ game: "dice", target: $("#tg").value, over: !!$("#ov").value }, r => $("#st").innerHTML = `<span class="reel">${r.result}</span>`);
+}
+function vSlots() {
+  $("#view").innerHTML = `<div class="row">${betInput()}<button class="go" id="play">Girar</button></div><div class="stage" id="st">🎰</div><div class="msg"></div>`;
+  $("#play").onclick = () => play({ game: "slots" }, r => $("#st").innerHTML = r.result.map(s => `<span class="reel">${s}</span>`).join(""));
+}
+function vDaily() {
+  const left = me.nextDaily - Date.now();
+  $("#view").innerHTML = `<p>Reclama ${fmt(me.config.dailyAmount)} ${me.config.currency} cada día.</p><button class="go" id="play">Reclamar</button><div class="msg" style="margin-top:12px">${left > 0 ? "Disponible en " + Math.ceil(left / 36e5) + " h" : ""}</div>`;
+  $("#play").onclick = async () => { try { const r = await api(`/api/guilds/${GID}/daily`, { method: "POST" }); setBal(r.balance); me.nextDaily = r.nextDaily; vDaily(); $(".msg").className = "msg win"; $(".msg").textContent = "¡Reclamado!"; } catch (e) { $(".msg").textContent = e.message; } };
+}
+async function vTop() {
+  const d = await api(`/api/guilds/${GID}/leaderboard`);
+  $("#view").innerHTML = `<table><tr><th>Jugador</th><th>${me.config.currency}</th></tr>${d.map(u => `<tr><td></td><td class="num">${fmt(u.balance)}</td></tr>`).join("")}</table>`;
+  document.querySelectorAll("#view tr:not(:first-child) td:first-child").forEach((td, i) => td.textContent = `${i + 1}. ${d[i].name}`);
+}
+async function vAdmin() {
+  const c = await api(`/api/guilds/${GID}/config`), g = c.games;
+  const n = (id, l, v, st = 1) => `<label>${l}<input id="${id}" type="number" step="${st}" value="${v}"></label>`;
+  $("#view").innerHTML = `<div class="grid">
+   <label>Nombre de la moneda<input id="cu" maxlength="20" value=""></label>${n("sb", "Saldo inicial", c.startBalance)}${n("da", "Recompensa diaria", c.dailyAmount)}${n("dc", "Horas entre recompensas", c.dailyCooldownH)}${n("mn", "Apuesta mínima", c.minBet)}${n("mx", "Apuesta máxima", c.maxBet)}</div><br>
+   <div class="grid">
+   <fieldset><legend>Cara o cruz</legend><label><span><input type="checkbox" id="ce" ${g.coinflip.enabled ? "checked" : ""}> Activado</span></label>${n("cp", "Multiplicador (1.01–1.99)", g.coinflip.payout, .01)}</fieldset>
+   <fieldset><legend>Dados</legend><label><span><input type="checkbox" id="de" ${g.dice.enabled ? "checked" : ""}> Activado</span></label>${n("dh", "Ventaja de la casa (0–0.5)", g.dice.houseEdge, .01)}</fieldset>
+   <fieldset><legend>Tragaperras</legend><label><span><input type="checkbox" id="se" ${g.slots.enabled ? "checked" : ""}> Activado</span></label>${n("s3", "Tres iguales ×", g.slots.payouts.three, .5)}${n("s2", "Dos iguales ×", g.slots.payouts.two, .1)}</fieldset></div><br>
+   <button class="go" id="sv">Guardar cambios</button> <span class="msg" id="sm"></span>`;
+  $("#cu").value = c.currency;
+  $("#sv").onclick = async () => {
+    const v = id => $("#" + id).value, ck = id => $("#" + id).checked;
+    try {
+      await api(`/api/guilds/${GID}/config`, { method: "PUT", body: { currency: v("cu"), startBalance: v("sb"), dailyAmount: v("da"), dailyCooldownH: v("dc"), minBet: v("mn"), maxBet: v("mx"),
+        games: { coinflip: { enabled: ck("ce"), payout: v("cp") }, dice: { enabled: ck("de"), houseEdge: v("dh") }, slots: { enabled: ck("se"), payouts: { three: v("s3"), two: v("s2") } } } } });
+      me = await api(`/api/guilds/${GID}/me`); $("#cur").textContent = me.config.currency;
+      $("#sm").className = "msg win"; $("#sm").textContent = "Guardado";
+    } catch (e) { $("#sm").className = "msg lose"; $("#sm").textContent = e.message; }
+  };
+}
+init();
+</script>
+</body>
+</html>
